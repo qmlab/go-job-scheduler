@@ -12,4 +12,4 @@ To enhance fairness, priority can be automatically adjusted based on waiting tim
 6.Use of Golang pipeline model to handle jobs and errors. The jobs will be passed in several channels and the error will go to an error sink for external handling.
 7.Use process groups to control processes together
 
-Mian Qin 11/2017
+qmlab 11/2017
