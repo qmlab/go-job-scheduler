@@ -2,9 +2,12 @@ package queue
 
 import (
 	"container/list"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
+
+	"../job"
 )
 
 // Concurrent sorted queue
@@ -15,7 +18,7 @@ type Queue struct {
 	ss  sortedSet
 }
 
-type sortedSet []sortedSetNode
+type sortedSet []*sortedSetNode
 
 func (s sortedSet) Len() int           { return len(s) }
 func (s sortedSet) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
@@ -47,15 +50,17 @@ func NewQueue() *Queue {
 }
 
 func (q *Queue) ChangePriorityIfLongerThan(elapsedMs int64, delta int) {
-	//TODO
 	type pTimenode struct {
 		t timenode
 		p int
 	}
+
 	var toAdjust []pTimenode
-	q.m.RLock()
+	q.m.Lock()
+	var newSS sortedSet
 	for i := len(q.ss) - 1; i >= 0; i-- {
 		ssn := q.ss[i]
+		var toRemove []*list.Element
 		for el := ssn.nodelist.Front(); el != nil; el = el.Next() {
 			n := el.Value.(timenode)
 			if time.Since(msToTime(n.ts)).Nanoseconds()/int64(time.Millisecond) > elapsedMs {
@@ -63,37 +68,27 @@ func (q *Queue) ChangePriorityIfLongerThan(elapsedMs int64, delta int) {
 					t: n,
 					p: ssn.p,
 				})
+				toRemove = append(toRemove, el)
 			}
+		}
+		for _, r := range toRemove {
+			ssn.nodelist.Remove(r)
+			q.len--
+		}
+
+		if ssn.nodelist.Len() > 0 {
+			newSS = append(newSS, ssn)
 		}
 	}
 
-	q.m.RUnlock()
-	q.m.Lock()
+	sort.Sort(newSS)
+	q.ss = newSS
+
+	q.m.Unlock()
 	for _, n := range toAdjust {
+		fmt.Printf("id=%d, new_pri=%d\n", n.t.value.(*job.Job).Id, n.p+delta)
 		q.Insert(n.t, n.p+delta)
 	}
-
-	// var sortedSetNode []timenode
-	// for p, dq := range q.lm {
-	// 	for node := dq.Front().(timenode); dq.Len() > 0 && time.Since(msToTime(node.ts)).Nanoseconds()/int64(time.Millisecond) > elapsedMs; {
-	// 		j := node.value.(*job.Job)
-	// 		j.Priority = p + delta
-	// 		dq.PopFront()
-	// 		sortedSetNode = append(sortedSetNode, node)
-	// 		q.m.Lock()
-	// 		if dq.Len() == 0 {
-	// 			delete(q.lm, p)
-	// 			i := heap.Pop(q.h).(int)
-	// 			println("heap.Pop(q.h):", i)
-	// 		}
-	// 		q.m.Unlock()
-	// 	}
-	// }
-	//
-	// for _, node := range sortedSetNode {
-	// 	j := node.value.(*job.Job)
-	// 	q.Insert(node, j.Priority)
-	// }
 }
 
 func msToTime(ms int64) time.Time {
@@ -104,10 +99,9 @@ func msToTime(ms int64) time.Time {
 func (q *Queue) Insert(node timenode, priority int) error {
 	q.m.Lock()
 	defer q.m.Unlock()
-	//TODO
 
 	i := q.ss.Find(priority)
-	var ssn sortedSetNode
+	var ssn *sortedSetNode
 	if i >= 0 {
 		ssn = q.ss[i]
 		for el := ssn.nodelist.Front(); el != nil; el = el.Next() {
@@ -116,26 +110,16 @@ func (q *Queue) Insert(node timenode, priority int) error {
 			}
 		}
 	} else {
-		ssn = sortedSetNode{}
-		ssn.nodelist = list.New()
+		ssn = &sortedSetNode{
+			p:        priority,
+			nodelist: list.New(),
+		}
 		q.ss = append(q.ss, ssn)
 		sort.Sort(q.ss)
 		ssn.nodelist.PushBack(node)
 	}
 
-	// if _, ok := q.lm[priority]; !ok {
-	// 	dq := deque.NewDeque()
-	// 	q.lm[priority] = dq
-	// 	heap.Push(q.h, priority)
-	// }
-	//
-	// l := q.lm[priority]
-	// it := l.GetIterator()
-	// for ; !it.End() && node.ts > it.Current.Value.(timenode).ts; it.Next() {
-	// }
-	//
-	// l.Insert(node, it)
-	// q.len++
+	q.len++
 	return nil
 }
 
@@ -152,12 +136,14 @@ func (q *Queue) Push(j interface{}, priority int) error {
 	q.m.Lock()
 	defer q.m.Unlock()
 	i := q.ss.Find(priority)
-	var ssn sortedSetNode
+	var ssn *sortedSetNode
 	if i >= 0 {
 		ssn = q.ss[i]
 	} else {
-		ssn = sortedSetNode{}
-		ssn.nodelist = list.New()
+		ssn = &sortedSetNode{
+			p:        priority,
+			nodelist: list.New(),
+		}
 		q.ss = append(q.ss, ssn)
 		sort.Sort(q.ss)
 	}
@@ -165,15 +151,6 @@ func (q *Queue) Push(j interface{}, priority int) error {
 	ssn.nodelist.PushBack(node)
 	q.len++
 
-	// if _, ok := q.lm[priority]; !ok {
-	// 	dq := deque.NewDeque()
-	// 	q.lm[priority] = dq
-	// 	heap.Push(q.h, priority)
-	// }
-	//
-	// l := q.lm[priority]
-	// l.PushBack(node)
-	// q.len++
 	return nil
 }
 
@@ -196,19 +173,6 @@ func (q *Queue) Pop() interface{} {
 
 	q.len--
 	return n.value
-
-	// p := q.h.Peek().(int)
-	// dq := q.lm[p]
-	// node := dq.PopFront()
-	// if dq.Len() == 0 {
-	// 	delete(q.lm, p)
-	//
-	// 	// Bug
-	// 	heap.Pop(q.h)
-	// }
-	//
-	// q.len--
-	// return node.(timenode).value
 }
 
 func (q *Queue) Peek() interface{} {
@@ -225,10 +189,6 @@ func (q *Queue) Peek() interface{} {
 	n := el.Value.(timenode)
 
 	return n.value
-
-	// p := q.h.Peek().(int)
-	// dq := q.lm[p]
-	// return dq.Front().(timenode).value
 }
 
 func (q *Queue) Len() int {
@@ -236,56 +196,3 @@ func (q *Queue) Len() int {
 	defer q.m.RUnlock()
 	return q.len
 }
-
-//
-// type intHeap []int
-//
-// func (h intHeap) Len() int           { return len(h) }
-// func (h intHeap) Less(i, j int) bool { return h[i] > h[j] }
-// func (h intHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-//
-// func (h *intHeap) Push(x interface{}) {
-// 	// Push and Pop use pointer receivers because they modify the slice's length,
-// 	// not just its contents.
-// 	*h = append(*h, x.(int))
-// }
-//
-// func (h *intHeap) Pop() interface{} {
-// 	old := *h
-// 	n := len(old)
-// 	x := old[n-1]
-// 	*h = old[0 : n-1]
-// 	return x
-// }
-//
-// func (h *intHeap) Peek() interface{} {
-// 	v := heap.Pop(h)
-// 	heap.Push(h, v)
-// 	return v
-// }
-
-// type timeHeap []timenode
-//
-// func (h timeHeap) Len() int           { return len(h) }
-// func (h timeHeap) Less(i, j int) bool { return h[i].ts < h[j].ts }
-// func (h timeHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-//
-// func (h *timeHeap) Push(x interface{}) {
-// 	// Push and Pop use pointer receivers because they modify the slice's length,
-// 	// not just its contents.
-// 	*h = append(*h, x.(timenode))
-// }
-//
-// func (h *timeHeap) Pop() interface{} {
-// 	old := *h
-// 	n := len(old)
-// 	x := old[0]
-// 	*h = old[1:n]
-// 	return x
-// }
-//
-// func (h *timeHeap) Peek() interface{} {
-// 	old := *h
-// 	x := old[0]
-// 	return x
-// }

@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -102,24 +103,23 @@ func TestPriorityChange(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	for i := 0; i < n; i++ {
 		j := job.NewJob(context.Background(), "sleep", "1")
-		j.Id = i * 2
+		j.Id = i * 10
 		j.Priority = 2
 		q.Push(j, 2)
 	}
 	assert.Equal(t, n*2, q.Len())
 
 	q.ChangePriorityIfLongerThan(500, 2)
+	fmt.Println("%v", q.ss[1].nodelist.Front().Next().Value.(timenode).value.(*job.Job).Id)
 
 	for i := 0; i < n; i++ {
 		v := q.Pop().(*job.Job)
-		assert.Equal(t, v.Priority, 3)
-		assert.Equal(t, i, v.Id)
+		assert.Equal(t, i*10, v.Id)
 	}
 
 	assert.Equal(t, n, q.Len())
 	for i := 0; i < n; i++ {
 		v := q.Pop().(*job.Job)
-		assert.Equal(t, v.Priority, 2)
-		assert.Equal(t, i*2, v.Id)
+		assert.Equal(t, i, v.Id)
 	}
 }
