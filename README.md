@@ -1,9 +1,9 @@
-#Simple job scheduler
+# Simple job scheduler
 
 Job scheduler that executes jobs based on priority and then time order.
 To enhance fairness, priority can be automatically adjusted based on waiting time.
 
-##What it has:
+## What it has:
 1.Isolation of child process from main process
 2.Execution control of the child processes.It will suspend and resume the child processes based on their run time, priority and scheduler policy.
 3.Resource-aware scheduling. Will scheduler jobs based on total number of CPUs
