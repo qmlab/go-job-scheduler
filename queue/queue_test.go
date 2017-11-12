@@ -2,7 +2,6 @@ package queue
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -19,7 +18,7 @@ func TestEmptyQueue(t *testing.T) {
 
 func TestSimpleQueue(t *testing.T) {
 	q := NewQueue()
-	n := 10
+	n := 100000
 	for i := 0; i < n; i++ {
 		j := job.NewJob(context.Background(), "sleep", "1")
 		j.Id = i
@@ -47,7 +46,7 @@ func TestSimpleQueue(t *testing.T) {
 
 func TestConcurrentQueue(t *testing.T) {
 	q := NewQueue()
-	n := 10
+	n := 100000
 	wg := sync.WaitGroup{}
 	wg.Add(n * 2)
 	go func() {
@@ -91,7 +90,7 @@ func TestConcurrentQueue(t *testing.T) {
 
 func TestPriorityChange(t *testing.T) {
 	q := NewQueue()
-	n := 10
+	n := 1000
 	for i := 0; i < n; i++ {
 		j := job.NewJob(context.Background(), "sleep", "1")
 		j.Id = i
@@ -110,7 +109,39 @@ func TestPriorityChange(t *testing.T) {
 	assert.Equal(t, n*2, q.Len())
 
 	q.ChangePriorityIfLongerThan(500, 2)
-	fmt.Println("%v", q.ss[1].nodelist.Front().Next().Value.(timenode).value.(*job.Job).Id)
+
+	for i := 0; i < n; i++ {
+		v := q.Pop().(*job.Job)
+		assert.Equal(t, i, v.Id)
+	}
+
+	assert.Equal(t, n, q.Len())
+	for i := 0; i < n; i++ {
+		v := q.Pop().(*job.Job)
+		assert.Equal(t, i*10, v.Id)
+	}
+}
+
+func TestPriorityChangeNegative(t *testing.T) {
+	q := NewQueue()
+	n := 10
+	for i := 0; i < n; i++ {
+		j := job.NewJob(context.Background(), "sleep", "1")
+		j.Id = i
+		j.Priority = 1
+		q.Push(j, 1)
+		assert.Equal(t, i+1, q.Len())
+	}
+
+	for i := 0; i < n; i++ {
+		j := job.NewJob(context.Background(), "sleep", "1")
+		j.Id = i * 10
+		j.Priority = 2
+		q.Push(j, 2)
+	}
+	assert.Equal(t, n*2, q.Len())
+
+	q.ChangePriorityIfLongerThan(1000, 2)
 
 	for i := 0; i < n; i++ {
 		v := q.Pop().(*job.Job)
@@ -121,5 +152,37 @@ func TestPriorityChange(t *testing.T) {
 	for i := 0; i < n; i++ {
 		v := q.Pop().(*job.Job)
 		assert.Equal(t, i, v.Id)
+	}
+}
+
+func BenchmarkPriorityChange(b *testing.B) {
+	q := NewQueue()
+	for i := 0; i < b.N; i++ {
+		j := job.NewJob(context.Background(), "sleep", "1")
+		j.Id = i
+		j.Priority = 1
+		q.Push(j, 1)
+	}
+
+	q.ChangePriorityIfLongerThan(1000, 2)
+
+	for i := 0; i < b.N; i++ {
+		q.Pop()
+	}
+}
+
+func BenchmarkPriorityChange2(b *testing.B) {
+	q := NewQueue()
+	for i := 0; i < b.N; i++ {
+		j := job.NewJob(context.Background(), "sleep", "1")
+		j.Id = i
+		j.Priority = 1
+		q.Push(j, 1)
+	}
+
+	q.ChangePriorityIfLongerThan(0, 2)
+
+	for i := 0; i < b.N; i++ {
+		q.Pop()
 	}
 }

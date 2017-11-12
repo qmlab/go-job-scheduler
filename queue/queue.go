@@ -2,12 +2,9 @@ package queue
 
 import (
 	"container/list"
-	"fmt"
 	"sort"
 	"sync"
 	"time"
-
-	"../job"
 )
 
 // Concurrent sorted queue
@@ -60,20 +57,21 @@ func (q *Queue) ChangePriorityIfLongerThan(elapsedMs int64, delta int) {
 	var newSS sortedSet
 	for i := len(q.ss) - 1; i >= 0; i-- {
 		ssn := q.ss[i]
-		var toRemove []*list.Element
-		for el := ssn.nodelist.Front(); el != nil; el = el.Next() {
+		for el := ssn.nodelist.Front(); el != nil; {
 			n := el.Value.(timenode)
 			if time.Since(msToTime(n.ts)).Nanoseconds()/int64(time.Millisecond) > elapsedMs {
 				toAdjust = append(toAdjust, pTimenode{
 					t: n,
 					p: ssn.p,
 				})
-				toRemove = append(toRemove, el)
+				rm := el
+				el = el.Next()
+				ssn.nodelist.Remove(rm)
+				q.len--
+				continue
 			}
-		}
-		for _, r := range toRemove {
-			ssn.nodelist.Remove(r)
-			q.len--
+
+			el = el.Next()
 		}
 
 		if ssn.nodelist.Len() > 0 {
@@ -86,7 +84,6 @@ func (q *Queue) ChangePriorityIfLongerThan(elapsedMs int64, delta int) {
 
 	q.m.Unlock()
 	for _, n := range toAdjust {
-		fmt.Printf("id=%d, new_pri=%d\n", n.t.value.(*job.Job).Id, n.p+delta)
 		q.Insert(n.t, n.p+delta)
 	}
 }
@@ -104,10 +101,14 @@ func (q *Queue) Insert(node timenode, priority int) error {
 	var ssn *sortedSetNode
 	if i >= 0 {
 		ssn = q.ss[i]
-		for el := ssn.nodelist.Front(); el != nil; el = el.Next() {
+		el := ssn.nodelist.Front()
+		for ; el != nil; el = el.Next() {
 			if el.Value.(timenode).ts > node.ts {
 				ssn.nodelist.InsertBefore(node, el)
 			}
+		}
+		if el == nil {
+			ssn.nodelist.PushBack(node)
 		}
 	} else {
 		ssn = &sortedSetNode{
