@@ -155,7 +155,24 @@ func TestPriorityChangeNegative(t *testing.T) {
 	}
 }
 
-func BenchmarkPriorityChange(b *testing.B) {
+func RemoveExpiredNodes(t *testing.T) {
+	q := NewQueue()
+	for i := 0; i < 10; i++ {
+		j := job.NewJob(context.Background(), "sleep", "1")
+		j.Id = i
+		j.Priority = 1
+		q.Push(j, 1)
+	}
+
+	js := q.ChangePriorityIfLongerThan(0, 0)
+	for i, v := range js {
+		assert.Equal(t, i, v.(*job.Job).Id)
+	}
+
+	assert.Equal(t, 0, q.len)
+}
+
+func BenchmarkPriorityChange1(b *testing.B) {
 	q := NewQueue()
 	for i := 0; i < b.N; i++ {
 		j := job.NewJob(context.Background(), "sleep", "1")
@@ -185,4 +202,16 @@ func BenchmarkPriorityChange2(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		q.Pop()
 	}
+}
+
+func BenchmarkPriorityChange3(b *testing.B) {
+	q := NewQueue()
+	for i := 0; i < b.N; i++ {
+		j := job.NewJob(context.Background(), "sleep", "1")
+		j.Id = i
+		j.Priority = 1
+		q.Push(j, 1)
+	}
+
+	q.ChangePriorityIfLongerThan(0, 0)
 }

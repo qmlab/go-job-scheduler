@@ -46,24 +46,32 @@ func NewQueue() *Queue {
 	return &q
 }
 
-func (q *Queue) ChangePriorityIfLongerThan(elapsedMs int64, delta int) {
+func (q *Queue) RemoveIfLongerThan(elapsedMs int64) []interface{} {
+	return q.ChangePriorityIfLongerThan(elapsedMs, 0)
+}
+
+func (q *Queue) ChangePriorityIfLongerThan(elapsedMs int64, delta int) []interface{} {
 	type pTimenode struct {
 		t timenode
 		p int
 	}
 
 	var toAdjust []pTimenode
+	var affectsValues []interface{}
 	q.m.Lock()
-	var newSS sortedSet
 	for i := len(q.ss) - 1; i >= 0; i-- {
 		ssn := q.ss[i]
 		for el := ssn.nodelist.Front(); el != nil; {
 			n := el.Value.(timenode)
 			if time.Since(msToTime(n.ts)).Nanoseconds()/int64(time.Millisecond) > elapsedMs {
-				toAdjust = append(toAdjust, pTimenode{
-					t: n,
-					p: ssn.p,
-				})
+				if delta != 0 {
+					toAdjust = append(toAdjust, pTimenode{
+						t: n,
+						p: ssn.p,
+					})
+				}
+
+				affectsValues = append(affectsValues, n.value)
 				rm := el
 				el = el.Next()
 				ssn.nodelist.Remove(rm)
@@ -73,19 +81,17 @@ func (q *Queue) ChangePriorityIfLongerThan(elapsedMs int64, delta int) {
 
 			el = el.Next()
 		}
+	}
 
-		if ssn.nodelist.Len() > 0 {
-			newSS = append(newSS, ssn)
+	q.m.Unlock()
+	// 0 means the node has expired
+	if delta != 0 {
+		for _, n := range toAdjust {
+			q.Insert(n.t, n.p+delta)
 		}
 	}
 
-	sort.Sort(newSS)
-	q.ss = newSS
-
-	q.m.Unlock()
-	for _, n := range toAdjust {
-		q.Insert(n.t, n.p+delta)
-	}
+	return affectsValues
 }
 
 func msToTime(ms int64) time.Time {

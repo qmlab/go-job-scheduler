@@ -1,52 +1,78 @@
 package scheduler
 
-import "../queue"
-import "../job"
+import (
+	"runtime"
+
+	"../job"
+	"../queue"
+)
 
 type WaitQueue struct {
-	wq        queue.Queue
-	pl        Policy
-	in        chan job.Job
-	errs      chan error
-	batchSize int
-	done      <-chan struct{}
+	q                       queue.Queue
+	pl                      Policy
+	ttl, ttadj              int64
+	runcount, pdelta, quota int
+	in, out                 chan *job.Job
+	errs                    chan error
+	done                    <-chan struct{}
 }
 
-func (wq *WaitQueue) Start(done <-chan struct{}) (out, retry chan job.Job, errs chan error) {
-	wq.in = make(chan job.Job)
-	wq.done = done
-	out = make(chan job.Job)
-	errs = make(chan error, 1)
-	retry = make(chan job.Job)
+func (wq *WaitQueue) Start(in chan *job.Job, ttl, ttadj int64, pdelta int, done <-chan struct{}, runcount <-chan int) (chan *job.Job, chan error) {
+	wq.ttl, wq.ttadj, wq.runcount, wq.pdelta, wq.quota = ttl, ttadj, 0, pdelta, getJobQuota()
+	wq.in, wq.out, wq.done, wq.errs = make(chan *job.Job), make(chan *job.Job), done, make(chan error, 1)
 	go func() {
 		defer close(wq.in)
-		defer close(out)
-		defer close(errs)
-		defer close(retry)
-		//TODO
+		defer close(wq.out)
+		defer close(wq.errs)
 		for {
 			select {
 			case <-wq.done:
 				return
+			case c := <-runcount:
+				wq.runcount = c
 			case j := <-wq.in:
 				//1.Check Done
-				//2.Adjust priority based on Policy
-				//3.Pop to out channel
-				//4.Push from in, retry and paused channels
-				if j.IsCancelled() {
-					if j.HasProcessExited() {
-						j.Stop()
-					}
-				} else {
+				expired := wq.q.RemoveIfLongerThan(ttl)
+				for _, v := range expired {
+					old := v.(*job.Job)
+					cancelJob(old)
+				}
 
+				//2.Adjust priority based on Policy
+				wq.q.ChangePriorityIfLongerThan(ttadj, pdelta)
+
+				//3.Pop to out channel
+				for i := wq.quota - wq.runcount; i > 0 && wq.q.Len() > 0; i-- {
+					old := wq.q.Pop().(*job.Job)
+					wq.out <- old
+				}
+
+				//4.Push in, retry and paused jobs
+				if j.IsCancelled() {
+					cancelJob(j)
+				} else {
+					wq.q.Push(j, j.Priority)
 				}
 			}
 		}
 	}()
 
-	return
+	return wq.out, wq.errs
 }
 
-func (wq *WaitQueue) Run(j job.Job) {
-	//TODO
+func (wq *WaitQueue) QueueJob(j *job.Job) {
+	wq.in <- j
+}
+
+func getJobQuota() int {
+	return runtime.NumCPU() - 1
+}
+
+func cancelJob(j *job.Job) {
+	j.State = job.Cancelled
+	go func() {
+		if !j.HasProcessExited() {
+			j.Stop()
+		}
+	}()
 }
