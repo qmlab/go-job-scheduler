@@ -197,6 +197,7 @@ func (q *Queue) RemoveIf(f func(interface{}) bool) {
 				rm := el
 				el = el.Next()
 				ssn.nodelist.Remove(rm)
+				q.len--
 				continue
 			}
 
