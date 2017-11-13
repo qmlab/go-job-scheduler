@@ -182,6 +182,29 @@ func (q *Queue) Pop() interface{} {
 	return n.value
 }
 
+func (q *Queue) RemoveIf(f func(interface{}) bool) {
+	q.m.Lock()
+	defer q.m.Unlock()
+
+	if q.len == 0 {
+		return
+	}
+
+	for _, ssn := range q.ss {
+		for el := ssn.nodelist.Front(); el != nil; {
+			v := el.Value.(timenode).value
+			if f(v) {
+				rm := el
+				el = el.Next()
+				ssn.nodelist.Remove(rm)
+				continue
+			}
+
+			el = el.Next()
+		}
+	}
+}
+
 func (q *Queue) Peek() interface{} {
 	if q.len == 0 {
 		return nil

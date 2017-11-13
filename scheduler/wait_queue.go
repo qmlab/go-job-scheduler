@@ -44,6 +44,7 @@ func (wq *WaitQueue) Start(in chan *job.Job, ttl, ttadj int64, pdelta int, done 
 				//3.Pop to out channel
 				for i := wq.quota - wq.runcount; i > 0 && wq.q.Len() > 0; i-- {
 					old := wq.q.Pop().(*job.Job)
+					old.State = job.Starting
 					wq.out <- old
 				}
 
@@ -69,10 +70,10 @@ func getJobQuota() int {
 }
 
 func cancelJob(j *job.Job) {
-	j.State = job.Cancelled
 	go func() {
 		if !j.HasProcessExited() {
 			j.Stop()
+			j.State = job.Cancelled
 		}
 	}()
 }
