@@ -17,6 +17,15 @@ func (s *scheduler) Run() {
 
 	var errcList []<-chan error
 	out, wqErr := s.wq.Start(s.ctx, ttl, ttadj, pdelta)
+	if ttr > 0 && len(out) > 0 {
+	}
+
+	// for_test
+	// go func() {
+	// 	for j := range out {
+	// 		println(j.Id)
+	// 	}
+	// }()
 
 	errcList = append(errcList, wqErr)
 	suspended, rc, rqErr := s.rq.Start(s.ctx, out, ttl, ttr)
@@ -25,6 +34,13 @@ func (s *scheduler) Run() {
 
 	errcList = append(errcList, rqErr)
 	s.es.WaitForPipeline(s.ctx, errcList...)
+
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			return
+		}
+	}()
 }
 
 func (s *scheduler) AddJob(j *job.Job) {

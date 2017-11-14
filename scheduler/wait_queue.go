@@ -3,6 +3,8 @@ package scheduler
 import (
 	"context"
 	"runtime"
+	"sync"
+	"time"
 
 	"../job"
 	"../queue"
@@ -19,18 +21,32 @@ type WaitQueue struct {
 	ctx                     context.Context
 }
 
-func (wq *WaitQueue) Start(ctx context.Context, ttl, ttadj int64, pdelta int) (chan *job.Job, chan error) {
+func (wq *WaitQueue) Start(ctx context.Context, ttl, ttadj int64, pdelta int) (<-chan *job.Job, <-chan error) {
 	wq.ctx = ctx
 	wq.ttl, wq.ttadj, wq.runcount, wq.pdelta, wq.quota = ttl, ttadj, 0, pdelta, getJobQuota()
 	wq.in, wq.out, wq.errs, wq.rc = make(chan *job.Job), make(chan *job.Job), make(chan error, 1), make(chan int)
+	ticker := time.NewTicker(time.Millisecond * 100)
 	go func() {
 		defer close(wq.in)
 		defer close(wq.out)
 		defer close(wq.errs)
 		defer close(wq.rc)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
+				//cancel jobs
+				var wg sync.WaitGroup
+				for n := wq.q.Pop(); n != nil; n = wq.q.Pop() {
+					j := n.(*job.Job)
+					wg.Add(1)
+					go func() {
+						cancelJob(j)
+						wg.Done()
+					}()
+				}
+				wg.Wait()
+
 				//drain channels
 				for range wq.rc {
 				}
@@ -38,36 +54,45 @@ func (wq *WaitQueue) Start(ctx context.Context, ttl, ttadj int64, pdelta int) (c
 				}
 				return
 			case c := <-wq.rc:
+				println("w.rc")
 				wq.runcount = c
 			case j := <-wq.in:
-				//1.Check Done
-				expired := wq.q.RemoveIfLongerThan(ttl)
-				for _, v := range expired {
-					old := v.(*job.Job)
-					cancelJob(old)
-				}
-
-				//2.Adjust priority based on Policy
-				wq.q.ChangePriorityIfLongerThan(ttadj, pdelta)
-
-				//3.Pop to out channel
-				for i := wq.quota - wq.runcount; i > 0 && wq.q.Len() > 0; i-- {
-					old := wq.q.Pop().(*job.Job)
-					old.State = job.Starting
-					wq.out <- old
-				}
-
-				//4.Push in, retry and paused jobs
+				//Push in, retry and paused jobs
 				if j.IsCancelled() {
 					cancelJob(j)
 				} else {
 					wq.q.Push(j, j.Priority)
 				}
+
+				//Pop job
+				go wq.PopJobs()
+			case <-ticker.C:
+				//Check Done
+				expired := wq.q.RemoveIfLongerThan(ttl)
+				for _, v := range expired {
+					println("w.expired")
+					old := v.(*job.Job)
+					cancelJob(old)
+				}
+
+				//Adjust priority based on Policy
+				wq.q.ChangePriorityIfLongerThan(ttadj, pdelta)
+
+				//Pop jobs
+				go wq.PopJobs()
 			}
 		}
 	}()
 
 	return wq.out, wq.errs
+}
+
+func (wq *WaitQueue) PopJobs() {
+	for i := wq.quota - wq.runcount; i > 0 && wq.q.Len() > 0; i-- {
+		old := wq.q.Pop().(*job.Job)
+		old.State = job.Starting
+		wq.out <- old
+	}
 }
 
 func (wq *WaitQueue) QueueJob(j *job.Job) {

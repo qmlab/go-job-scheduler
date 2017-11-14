@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"../job"
 	"../queue"
@@ -18,17 +20,31 @@ type RunQueue struct {
 	ctx       context.Context
 }
 
-func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, ttl, ttr int64) (chan *job.Job, chan int, chan error) {
+func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, ttl, ttr int64) (<-chan *job.Job, <-chan int, <-chan error) {
 	rq.ctx = ctx
 	rq.ttl, rq.ttr = ttl, ttr
-	rq.suspended, rq.runcount, rq.errs = make(chan *job.Job), make(chan int), make(chan error, 1)
+	rq.in, rq.suspended, rq.runcount, rq.errs = in, make(chan *job.Job), make(chan int), make(chan error, 1)
+	ticker := time.NewTicker(time.Millisecond * 100)
 	go func() {
 		defer close(rq.suspended)
 		defer close(rq.runcount)
 		defer close(rq.errs)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-rq.ctx.Done():
+				//cancel jobs
+				var wg sync.WaitGroup
+				for n := rq.q.Pop(); n != nil; n = rq.q.Pop() {
+					j := n.(*job.Job)
+					wg.Add(1)
+					go func() {
+						cancelJob(j)
+						wg.Done()
+					}()
+				}
+				wg.Wait()
+
 				//drain
 				for range rq.in {
 				}
@@ -38,14 +54,7 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, ttl, ttr int6
 				}
 				return
 			case j := <-rq.in:
-				//1.Check Done
-				expired := rq.q.RemoveIfLongerThan(ttl)
-				for _, v := range expired {
-					old := v.(*job.Job)
-					cancelJob(old)
-				}
-
-				//2.Push & start job
+				//Push & start job
 				if j.State == job.Paused {
 					j.Resume()
 				} else {
@@ -53,8 +62,16 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, ttl, ttr int6
 				}
 
 				rq.q.Push(j, j.Priority)
+			case <-ticker.C:
+				// println("r.tick")
+				//Check Done
+				expired := rq.q.RemoveIfLongerThan(ttl)
+				for _, v := range expired {
+					old := v.(*job.Job)
+					cancelJob(old)
+				}
 
-				//3.Check & update job states
+				//Check & update job states
 				rq.q.RemoveIf(func(v interface{}) bool {
 					old := v.(*job.Job)
 					if old.HasProcessExited() {
@@ -68,7 +85,7 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, ttl, ttr int6
 					return false
 				})
 
-				//4.Pop out to wait queue according to ttr
+				//Pop out to wait queue according to ttr
 				paused := rq.q.RemoveIfLongerThan(ttr)
 				for _, v := range paused {
 					old := v.(*job.Job)

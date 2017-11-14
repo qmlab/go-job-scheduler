@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"runtime"
@@ -30,6 +31,7 @@ type Job struct {
 func NewJob(ctx context.Context, binary string, args ...string) *Job {
 	cmd := exec.CommandContext(ctx, binary, args...)
 	return &Job{
+		Id:    rand.Int(),
 		Cmd:   cmd,
 		State: Created,
 		ctx:   ctx,
