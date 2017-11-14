@@ -17,15 +17,12 @@ func (s *scheduler) Run() {
 
 	var errcList []<-chan error
 	out, wqErr := s.wq.Start(s.ctx, delta, ttl, ttadj, pdelta)
-	if ttr > 0 && len(out) > 0 {
-	}
-
 	errcList = append(errcList, wqErr)
-	suspended, rc, rqErr := s.rq.Start(s.ctx, out, delta, ttl, ttr)
 
+	suspended, rc, rqErr := s.rq.Start(s.ctx, out, delta, ttl, ttr)
+	errcList = append(errcList, rqErr)
 	s.feedback(suspended, rc)
 
-	errcList = append(errcList, rqErr)
 	s.es.WaitForPipeline(s.ctx, errcList...)
 
 	go func() {
