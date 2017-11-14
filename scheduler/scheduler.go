@@ -13,15 +13,15 @@ type scheduler struct {
 
 func (s *scheduler) Run() {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	ttl, ttadj, ttr, pdelta := int64(1000*120), int64(1000*5), int64(1000*2), 1
+	delta, ttl, ttadj, ttr, pdelta := int64(100), int64(1000*120), int64(1000*5), int64(1000*2), 1
 
 	var errcList []<-chan error
-	out, wqErr := s.wq.Start(s.ctx, ttl, ttadj, pdelta)
+	out, wqErr := s.wq.Start(s.ctx, delta, ttl, ttadj, pdelta)
 	if ttr > 0 && len(out) > 0 {
 	}
 
 	errcList = append(errcList, wqErr)
-	suspended, rc, rqErr := s.rq.Start(s.ctx, out, ttl, ttr)
+	suspended, rc, rqErr := s.rq.Start(s.ctx, out, delta, ttl, ttr)
 
 	s.feedback(suspended, rc)
 

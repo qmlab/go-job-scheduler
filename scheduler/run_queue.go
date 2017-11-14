@@ -20,11 +20,11 @@ type RunQueue struct {
 	ctx       context.Context
 }
 
-func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, ttl, ttr int64) (<-chan *job.Job, <-chan int, <-chan error) {
+func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, ttr int64) (<-chan *job.Job, <-chan int, <-chan error) {
 	rq.ctx = ctx
 	rq.ttl, rq.ttr = ttl, ttr
 	rq.in, rq.suspended, rq.runcount, rq.errs = in, make(chan *job.Job), make(chan int), make(chan error, 1)
-	ticker := time.NewTicker(time.Millisecond * 100)
+	ticker := time.NewTicker(time.Millisecond * time.Duration(delta))
 	go func() {
 		defer close(rq.suspended)
 		defer close(rq.runcount)

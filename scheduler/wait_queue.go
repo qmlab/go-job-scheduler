@@ -21,11 +21,11 @@ type WaitQueue struct {
 	ctx                     context.Context
 }
 
-func (wq *WaitQueue) Start(ctx context.Context, ttl, ttadj int64, pdelta int) (<-chan *job.Job, <-chan error) {
+func (wq *WaitQueue) Start(ctx context.Context, delta, ttl, ttadj int64, pdelta int) (<-chan *job.Job, <-chan error) {
 	wq.ctx = ctx
 	wq.ttl, wq.ttadj, wq.runcount, wq.pdelta, wq.quota = ttl, ttadj, 0, pdelta, getJobQuota()
 	wq.in, wq.out, wq.errs, wq.rc = make(chan *job.Job), make(chan *job.Job), make(chan error, 1), make(chan int)
-	ticker := time.NewTicker(time.Millisecond * 100)
+	ticker := time.NewTicker(time.Millisecond * time.Duration(delta))
 	go func() {
 		defer close(wq.in)
 		defer close(wq.out)
