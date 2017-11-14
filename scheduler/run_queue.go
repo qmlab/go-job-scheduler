@@ -1,7 +1,11 @@
 package scheduler
 
-import "../queue"
-import "../job"
+import (
+	"context"
+
+	"../job"
+	"../queue"
+)
 
 type RunQueue struct {
 	q         queue.Queue
@@ -10,24 +14,32 @@ type RunQueue struct {
 	in        <-chan *job.Job
 	suspended chan *job.Job
 	errs      chan error
-	done      <-chan struct{}
 	runcount  chan int
+	ctx       context.Context
 }
 
-func (wq *RunQueue) Start(in <-chan *job.Job, ttl, ttr int64, done <-chan struct{}) (chan *job.Job, chan int, chan error) {
-	wq.ttl, wq.ttr = ttl, ttr
-	wq.suspended, wq.runcount, wq.done, wq.errs = make(chan *job.Job), make(chan int), done, make(chan error, 1)
+func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, ttl, ttr int64) (chan *job.Job, chan int, chan error) {
+	rq.ctx = ctx
+	rq.ttl, rq.ttr = ttl, ttr
+	rq.suspended, rq.runcount, rq.errs = make(chan *job.Job), make(chan int), make(chan error, 1)
 	go func() {
-		defer close(wq.suspended)
-		defer close(wq.runcount)
-		defer close(wq.errs)
+		defer close(rq.suspended)
+		defer close(rq.runcount)
+		defer close(rq.errs)
 		for {
 			select {
-			case <-wq.done:
+			case <-rq.ctx.Done():
+				//drain
+				for range rq.in {
+				}
+				for range rq.runcount {
+				}
+				for range rq.suspended {
+				}
 				return
-			case j := <-wq.in:
+			case j := <-rq.in:
 				//1.Check Done
-				expired := wq.q.RemoveIfLongerThan(ttl)
+				expired := rq.q.RemoveIfLongerThan(ttl)
 				for _, v := range expired {
 					old := v.(*job.Job)
 					cancelJob(old)
@@ -40,10 +52,10 @@ func (wq *RunQueue) Start(in <-chan *job.Job, ttl, ttr int64, done <-chan struct
 					j.Start()
 				}
 
-				wq.q.Push(j, j.Priority)
+				rq.q.Push(j, j.Priority)
 
 				//3.Check & update job states
-				wq.q.RemoveIf(func(v interface{}) bool {
+				rq.q.RemoveIf(func(v interface{}) bool {
 					old := v.(*job.Job)
 					if old.HasProcessExited() {
 						old.State = job.Finished
@@ -57,19 +69,19 @@ func (wq *RunQueue) Start(in <-chan *job.Job, ttl, ttr int64, done <-chan struct
 				})
 
 				//4.Pop out to wait queue according to ttr
-				paused := wq.q.RemoveIfLongerThan(ttr)
+				paused := rq.q.RemoveIfLongerThan(ttr)
 				for _, v := range paused {
 					old := v.(*job.Job)
 					go func() {
 						pauseJob(old)
-						wq.suspended <- old
+						rq.suspended <- old
 					}()
 				}
 			}
 		}
 	}()
 
-	return wq.suspended, wq.runcount, wq.errs
+	return rq.suspended, rq.runcount, rq.errs
 }
 
 func pauseJob(j *job.Job) {
