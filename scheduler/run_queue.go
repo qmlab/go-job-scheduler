@@ -63,7 +63,6 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, ttl, ttr int6
 
 				rq.q.Push(j, j.Priority)
 			case <-ticker.C:
-				// println("r.tick")
 				//Check Done
 				expired := rq.q.RemoveIfLongerThan(ttl)
 				for _, v := range expired {

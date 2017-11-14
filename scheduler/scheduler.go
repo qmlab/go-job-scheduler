@@ -20,13 +20,6 @@ func (s *scheduler) Run() {
 	if ttr > 0 && len(out) > 0 {
 	}
 
-	// for_test
-	// go func() {
-	// 	for j := range out {
-	// 		println(j.Id)
-	// 	}
-	// }()
-
 	errcList = append(errcList, wqErr)
 	suspended, rc, rqErr := s.rq.Start(s.ctx, out, ttl, ttr)
 
