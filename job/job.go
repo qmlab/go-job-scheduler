@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -19,13 +20,15 @@ type Job struct {
 	Id       int       // ID
 	Gid      int       // Group ID
 	Priority int       // Scheduler priority
-	State    JobState  // Job atate
-	ctx      context.Context
+	state    JobState  // Job atate
+	Err      error
 
+	ctx     context.Context
 	pid     int // Process ID
 	wt      time.Duration
 	rt      time.Duration
 	retries int
+	m       sync.RWMutex
 }
 
 func NewJob(ctx context.Context, binary string, args ...string) *Job {
@@ -33,7 +36,7 @@ func NewJob(ctx context.Context, binary string, args ...string) *Job {
 	return &Job{
 		Id:    rand.Int(),
 		Cmd:   cmd,
-		State: Created,
+		state: Created,
 		ctx:   ctx,
 	}
 }
@@ -56,13 +59,42 @@ func (j *Job) Start() error {
 		return nil
 	}
 
-	if err := j.Cmd.Start(); err != nil {
-		return err
+	j.Cmd.Start()
+	j.pid = j.Cmd.Process.Pid
+	j.SetState(Started)
+	go func() {
+		if err := j.Cmd.Wait(); err != nil {
+			j.Err = err
+			j.SetState(Failed)
+		} else {
+			j.SetState(Finished)
+		}
+	}()
+
+	return syscall.Setpgid(j.pid, j.Gid)
+}
+
+func (j *Job) SetState(s int) {
+	j.m.Lock()
+	defer j.m.Unlock()
+	j.state = JobState(s)
+}
+
+func (j *Job) GetState() int {
+	j.m.RLock()
+	defer j.m.RUnlock()
+	return int(j.state)
+}
+
+func (j *Job) Wait() error {
+	for {
+		time.Sleep(10 * time.Millisecond)
+		if s := j.GetState(); s == Cancelled || s == Finished || s == Failed {
+			break
+		}
 	}
 
-	j.pid = j.Cmd.Process.Pid
-	j.State = Started
-	return syscall.Setpgid(j.pid, j.Gid)
+	return j.Err
 }
 
 func (j *Job) Pause() error {
@@ -87,14 +119,6 @@ func (j *Job) Stop() error {
 	}
 
 	return syscall.Kill(j.pid, syscall.SIGTERM)
-}
-
-func (j *Job) Wait() error {
-	if j.Cmd == nil {
-		return fmt.Errorf("Job error: cmd does not exist")
-	}
-
-	return j.Cmd.Wait()
 }
 
 func (j *Job) GetProcessCpu() (utime, stime uint64, err error) {

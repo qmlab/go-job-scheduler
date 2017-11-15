@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"../job"
@@ -17,6 +18,7 @@ type RunQueue struct {
 	suspended chan *job.Job
 	errs      chan error
 	runcount  chan int
+	count     int32
 	ctx       context.Context
 }
 
@@ -55,13 +57,17 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, t
 				return
 			case j := <-rq.in:
 				//Push & start job
-				if j.State == job.Paused {
-					j.Resume()
-				} else {
-					j.Start()
-				}
-
-				rq.q.Push(j, j.Priority)
+				go func() {
+					if j.GetState() == job.Paused {
+						j.Resume()
+						// println("resumed")
+					} else {
+						j.Start()
+						// println("started")
+					}
+					rq.increaseRunCount()
+					rq.q.Push(j, j.Priority)
+				}()
 			case <-ticker.C:
 				//Check Done
 				expired := rq.q.RemoveIfLongerThan(ttl)
@@ -74,11 +80,15 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, t
 				rq.q.RemoveIf(func(v interface{}) bool {
 					old := v.(*job.Job)
 					if old.HasProcessExited() {
-						old.State = job.Finished
+						old.SetState(job.Finished)
+						// println("finished")
+						rq.decreaseRunCount()
 						return true
 					}
 					if old.IsCancelled() {
-						old.State = job.Cancelled
+						rq.decreaseRunCount()
+						// println("cancelled")
+						old.SetState(job.Cancelled)
 						return true
 					}
 					return false
@@ -90,6 +100,8 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, t
 					old := v.(*job.Job)
 					go func() {
 						pauseJob(old)
+						// println("paused")
+						rq.decreaseRunCount()
 						rq.suspended <- old
 					}()
 				}
@@ -100,9 +112,25 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, t
 	return rq.suspended, rq.runcount, rq.errs
 }
 
+func (rq *RunQueue) increaseRunCount() {
+	atomic.AddInt32(&rq.count, 1)
+	// println("increaseRunCount.c=", rq.count)
+	go func() {
+		rq.runcount <- int(rq.count)
+	}()
+}
+
+func (rq *RunQueue) decreaseRunCount() {
+	atomic.AddInt32(&rq.count, -1)
+	// println("decreaseRunCount", rq.count)
+	go func() {
+		rq.runcount <- int(rq.count)
+	}()
+}
+
 func pauseJob(j *job.Job) {
 	if !j.HasProcessExited() {
 		j.Pause()
-		j.State = job.Paused
+		j.SetState(job.Paused)
 	}
 }

@@ -7,7 +7,6 @@ const (
 	Unknown = iota
 	Created
 	Queued
-	Starting
 	Started
 	Paused
 	Cancelled
