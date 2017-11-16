@@ -5,14 +5,17 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/jonboulle/clockwork"
 )
 
 // Concurrent sorted queue
 
 type Queue struct {
-	m   sync.RWMutex
-	len int
-	ss  sortedSet
+	m     sync.RWMutex
+	len   int
+	ss    sortedSet
+	clock clockwork.Clock
 }
 
 type sortedSet []*sortedSetNode
@@ -40,9 +43,10 @@ type timenode struct {
 	value interface{}
 }
 
-func NewQueue() *Queue {
+func NewQueue(clock clockwork.Clock) *Queue {
 	var q Queue
 	q.m = sync.RWMutex{}
+	q.clock = clock
 	return &q
 }
 
@@ -58,12 +62,13 @@ func (q *Queue) ChangePriorityIfLongerThan(elapsedMs int64, delta int) []interfa
 
 	var toAdjust []pTimenode
 	var affectsValues []interface{}
+
 	q.m.Lock()
 	for i := len(q.ss) - 1; i >= 0; i-- {
 		ssn := q.ss[i]
 		for el := ssn.nodelist.Front(); el != nil; {
 			n := el.Value.(timenode)
-			if time.Since(msToTime(n.ts)).Nanoseconds()/int64(time.Millisecond) > elapsedMs {
+			if q.clock.Since(msToTime(n.ts)).Nanoseconds()/int64(time.Millisecond) > elapsedMs {
 				if delta != 0 {
 					toAdjust = append(toAdjust, pTimenode{
 						t: n,
@@ -136,7 +141,7 @@ func (q *Queue) Push(j interface{}, priority int) error {
 	}
 
 	node := timenode{
-		ts:    time.Now().UTC().UnixNano() / int64(time.Millisecond),
+		ts:    q.clock.Now().UTC().UnixNano() / int64(time.Millisecond),
 		value: j,
 	}
 

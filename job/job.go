@@ -65,7 +65,12 @@ func (j *Job) Start() error {
 	go func() {
 		if err := j.Cmd.Wait(); err != nil {
 			j.Err = err
-			j.SetState(Failed)
+			if j.GetState() != Cancelled {
+				j.SetState(Failed)
+			}
+
+			//debug
+			// println(err.(*exec.ExitError).Error())
 		} else {
 			j.SetState(Finished)
 		}
@@ -90,6 +95,7 @@ func (j *Job) Wait() error {
 	for {
 		time.Sleep(10 * time.Millisecond)
 		if s := j.GetState(); s == Cancelled || s == Finished || s == Failed {
+			// println("job.status=", s)
 			break
 		}
 	}
