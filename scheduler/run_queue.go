@@ -3,33 +3,36 @@ package scheduler
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"../job"
 	"../queue"
+	"github.com/jonboulle/clockwork"
 )
 
 type RunQueue struct {
-	q         queue.Queue
+	q         *queue.Queue
 	pl        Policy
 	ttl, ttr  int64
 	in        <-chan *job.Job
 	suspended chan *job.Job
 	errs      chan error
-	runcount  chan int
+	rundone   chan struct{}
 	count     int32
 	ctx       context.Context
+	clock     clockwork.Clock
 }
 
-func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, ttr int64) (<-chan *job.Job, <-chan int, <-chan error) {
+func (rq *RunQueue) Start(ctx context.Context, clock clockwork.Clock, in <-chan *job.Job, delta, ttl, ttr int64) (<-chan *job.Job, <-chan struct{}, <-chan error) {
 	rq.ctx = ctx
+	rq.clock = clock
 	rq.ttl, rq.ttr = ttl, ttr
-	rq.in, rq.suspended, rq.runcount, rq.errs = in, make(chan *job.Job), make(chan int), make(chan error, 1)
+	rq.in, rq.suspended, rq.rundone, rq.errs = in, make(chan *job.Job), make(chan struct{}), make(chan error, 1)
 	ticker := time.NewTicker(time.Millisecond * time.Duration(delta))
+	rq.q = queue.NewQueue(rq.clock)
 	go func() {
 		defer close(rq.suspended)
-		defer close(rq.runcount)
+		defer close(rq.rundone)
 		defer close(rq.errs)
 		defer ticker.Stop()
 		for {
@@ -50,7 +53,7 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, t
 				//drain
 				for range rq.in {
 				}
-				for range rq.runcount {
+				for range rq.rundone {
 				}
 				for range rq.suspended {
 				}
@@ -65,7 +68,6 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, t
 						j.Start()
 						// println("started")
 					}
-					rq.increaseRunCount()
 					rq.q.Push(j, j.Priority)
 				}()
 			case <-ticker.C:
@@ -73,7 +75,8 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, t
 				expired := rq.q.RemoveIfLongerThan(ttl)
 				for _, v := range expired {
 					old := v.(*job.Job)
-					cancelJob(old)
+					go cancelJob(old)
+					rq.runDone()
 				}
 
 				//Check & update job states
@@ -82,12 +85,12 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, t
 					if old.HasProcessExited() {
 						old.SetState(job.Finished)
 						// println("finished")
-						rq.decreaseRunCount()
+						rq.runDone()
 						return true
 					}
 					if old.IsCancelled() {
-						rq.decreaseRunCount()
 						// println("cancelled")
+						rq.runDone()
 						old.SetState(job.Cancelled)
 						return true
 					}
@@ -99,9 +102,9 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, t
 				for _, v := range paused {
 					old := v.(*job.Job)
 					go func() {
-						pauseJob(old)
 						// println("paused")
-						rq.decreaseRunCount()
+						pauseJob(old)
+						rq.runDone()
 						rq.suspended <- old
 					}()
 				}
@@ -109,22 +112,12 @@ func (rq *RunQueue) Start(ctx context.Context, in <-chan *job.Job, delta, ttl, t
 		}
 	}()
 
-	return rq.suspended, rq.runcount, rq.errs
+	return rq.suspended, rq.rundone, rq.errs
 }
 
-func (rq *RunQueue) increaseRunCount() {
-	atomic.AddInt32(&rq.count, 1)
-	// println("increaseRunCount.c=", rq.count)
+func (rq *RunQueue) runDone() {
 	go func() {
-		rq.runcount <- int(rq.count)
-	}()
-}
-
-func (rq *RunQueue) decreaseRunCount() {
-	atomic.AddInt32(&rq.count, -1)
-	// println("decreaseRunCount", rq.count)
-	go func() {
-		rq.runcount <- int(rq.count)
+		rq.rundone <- struct{}{}
 	}()
 }
 

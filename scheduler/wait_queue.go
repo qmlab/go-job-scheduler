@@ -4,33 +4,37 @@ import (
 	"context"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"../job"
 	"../queue"
+	"github.com/jonboulle/clockwork"
 )
 
 type WaitQueue struct {
-	q                       queue.Queue
-	pl                      Policy
-	ttl, ttadj              int64
-	runcount, pdelta, quota int
-	in, out                 chan *job.Job
-	rc                      chan int
-	errs                    chan error
-	ctx                     context.Context
+	q                                   *queue.Queue
+	pl                                  Policy
+	ttl, ttadj, pdelta, quota, maxQuota int64
+	in, out                             chan *job.Job
+	errs                                chan error
+	ctx                                 context.Context
+	m                                   sync.RWMutex
+	clock                               clockwork.Clock
 }
 
-func (wq *WaitQueue) Start(ctx context.Context, delta, ttl, ttadj int64, pdelta int, multiplier float64) (<-chan *job.Job, <-chan error) {
+func (wq *WaitQueue) Start(ctx context.Context, clock clockwork.Clock, delta, ttl, ttadj, pdelta int64, multiplier float64) (<-chan *job.Job, <-chan error) {
 	wq.ctx = ctx
-	wq.ttl, wq.ttadj, wq.runcount, wq.pdelta, wq.quota = ttl, ttadj, 0, pdelta, getJobQuota(multiplier)
-	wq.in, wq.out, wq.errs, wq.rc = make(chan *job.Job), make(chan *job.Job), make(chan error, 1), make(chan int)
+	wq.clock = clock
+	wq.ttl, wq.ttadj, wq.pdelta, wq.maxQuota = ttl, ttadj, pdelta, getJobQuota(multiplier)
+	wq.quota = wq.maxQuota
+	wq.in, wq.out, wq.errs = make(chan *job.Job), make(chan *job.Job), make(chan error, 1)
 	ticker := time.NewTicker(time.Millisecond * time.Duration(delta))
+	wq.q = queue.NewQueue(wq.clock)
 	go func() {
 		defer close(wq.in)
 		defer close(wq.out)
 		defer close(wq.errs)
-		defer close(wq.rc)
 		defer ticker.Stop()
 		for {
 			select {
@@ -48,13 +52,9 @@ func (wq *WaitQueue) Start(ctx context.Context, delta, ttl, ttadj int64, pdelta 
 				wg.Wait()
 
 				//drain channels
-				for range wq.rc {
-				}
 				for range wq.in {
 				}
 				return
-			case c := <-wq.rc:
-				wq.runcount = c
 			case j := <-wq.in:
 				//Push in, retry and paused jobs
 				if j.IsCancelled() {
@@ -64,20 +64,20 @@ func (wq *WaitQueue) Start(ctx context.Context, delta, ttl, ttadj int64, pdelta 
 				}
 
 				//Pop job
-				wq.PopJobs()
+				// wq.PopJobs()
 			case <-ticker.C:
 				//Check Done
 				expired := wq.q.RemoveIfLongerThan(ttl)
 				for _, v := range expired {
 					old := v.(*job.Job)
-					cancelJob(old)
+					go cancelJob(old)
 				}
 
 				//Adjust priority based on Policy
-				wq.q.ChangePriorityIfLongerThan(ttadj, pdelta)
+				wq.q.ChangePriorityIfLongerThan(ttadj, int(pdelta))
 
 				//Pop jobs
-				wq.PopJobs()
+				wq.PopJob()
 			}
 		}
 	}()
@@ -85,16 +85,21 @@ func (wq *WaitQueue) Start(ctx context.Context, delta, ttl, ttadj int64, pdelta 
 	return wq.out, wq.errs
 }
 
-func (wq *WaitQueue) PopJobs() {
-	go func() {
-		l := wq.q.Len()
-		for i := wq.quota - wq.runcount; i > 0 && l > 0; i-- {
-			old := wq.q.Pop()
-			if old != nil {
-				wq.out <- old.(*job.Job)
-			}
-		}
-	}()
+func (wq *WaitQueue) PopJob() {
+	wq.m.Lock()
+	defer wq.m.Unlock()
+	l := wq.q.Len()
+	if l <= 0 || wq.quota <= 0 {
+		return
+	}
+
+	old := wq.q.Pop()
+	if old != nil {
+		atomic.AddInt64(&wq.quota, -1)
+		go func() {
+			wq.out <- old.(*job.Job)
+		}()
+	}
 }
 
 func (wq *WaitQueue) QueueJob(j *job.Job) {
@@ -103,20 +108,22 @@ func (wq *WaitQueue) QueueJob(j *job.Job) {
 	}()
 }
 
-func (wq *WaitQueue) SetRuncount(count int) {
+func (wq *WaitQueue) RunDone() {
 	go func() {
-		wq.rc <- count
+		atomic.AddInt64(&wq.quota, 1)
 	}()
 }
 
-func getJobQuota(multiplier float64) int {
-	return int(multiplier*float64(runtime.NumCPU())) - 2
+func getJobQuota(multiplier float64) int64 {
+	return int64(multiplier*float64(runtime.NumCPU())) - 2
 }
 
-func cancelJob(j *job.Job) {
+func cancelJob(j *job.Job) bool {
 	if !j.HasProcessExited() {
-		// println("cancel")
 		j.Stop()
 		j.SetState(job.Cancelled)
+		return true
 	}
+
+	return false
 }
