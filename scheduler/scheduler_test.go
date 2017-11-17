@@ -129,3 +129,21 @@ func TestSchedulerStress(t *testing.T) {
 
 	wg.Wait()
 }
+
+func BenchmarkSchedulerBasic(b *testing.B) {
+	s := DefaultScheduler()
+	s.CPUMultiplier = 3
+	s.Run()
+	var wg sync.WaitGroup
+	for i := 1; i < b.N; i++ {
+		wg.Add(1)
+		j := job.NewJob(context.Background(), "echo", "2>&1")
+		s.AddJob(j)
+		go func() {
+			j.Wait()
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+}
