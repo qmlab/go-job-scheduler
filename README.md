@@ -9,7 +9,7 @@ Jobs running for longer than TTR will be suspended and requeued.
 
 Jobs can be controlled (stop/resume/pause) at any time. The scheduler will learn the change and adapt the queues to it.
 
-Scheduler can be safely shut down using Close() call at any time. It will cancel all running forked processes.
+Scheduler can be safely shut down using Close() call at any time. It will cancel all running spawned processes.
 
 ## Features
 * Isolation of child process from main process
