@@ -1,7 +1,15 @@
-# Simple job scheduler
+# Go Job Scheduler
 
-Job scheduler that executes jobs based on priority and then time order.
+Job scheduler that executes jobs as forked processes based on priority and then time order.
 To enhance fairness, priority can be automatically adjusted based on waiting time.
+
+Jobs added longer than a TTL will be cancelled.
+
+Jobs running for longer than TTR will be suspended and requeued.
+
+Jobs can be controlled (stop/resume/pause) at any time. The scheduler will learn the change and adapt the queues to it.
+
+Scheduler can be safely shut down using Close() call at any time. It will cancel all running forked processes.
 
 ## Goals
 * Isolation of child process from main process
