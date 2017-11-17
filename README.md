@@ -13,4 +13,6 @@ To enhance fairness, priority can be automatically adjusted based on waiting tim
 7.Use process groups to control processes together
 8.Affinity of the main process
 
-qmlab 11/2017
+## License
+
+MIT License
