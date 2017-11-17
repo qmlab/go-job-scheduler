@@ -13,6 +13,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/jonboulle/clockwork"
 )
 
 type Job struct {
@@ -22,6 +24,7 @@ type Job struct {
 	Priority int       // Scheduler priority
 	state    JobState  // Job atate
 	Err      error
+	Clock    clockwork.Clock
 
 	ctx     context.Context
 	pid     int // Process ID
@@ -38,6 +41,7 @@ func NewJob(ctx context.Context, binary string, args ...string) *Job {
 		Cmd:   cmd,
 		state: Created,
 		ctx:   ctx,
+		Clock: clockwork.NewRealClock(),
 	}
 }
 
@@ -64,10 +68,12 @@ func (j *Job) Start() error {
 	j.SetState(Started)
 	go func() {
 		if err := j.Cmd.Wait(); err != nil {
+			j.m.Lock()
 			j.Err = err
-			if j.GetState() != Cancelled {
-				j.SetState(Failed)
+			if j.state != Cancelled {
+				j.state = Failed
 			}
+			j.m.Unlock()
 
 			//debug
 			// println(err.(*exec.ExitError).Error())
@@ -91,16 +97,21 @@ func (j *Job) GetState() int {
 	return int(j.state)
 }
 
+func (j *Job) GetErr() error {
+	j.m.RLock()
+	defer j.m.RUnlock()
+	return j.Err
+}
+
 func (j *Job) Wait() error {
 	for {
-		time.Sleep(10 * time.Millisecond)
+		j.Clock.Sleep(10 * time.Millisecond)
 		if s := j.GetState(); s == Cancelled || s == Finished || s == Failed {
-			// println("job.status=", s)
 			break
 		}
 	}
 
-	return j.Err
+	return j.GetErr()
 }
 
 func (j *Job) Pause() error {
