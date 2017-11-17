@@ -4,7 +4,6 @@ import (
 	"context"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"../job"
@@ -62,9 +61,6 @@ func (wq *WaitQueue) Start(ctx context.Context, clock clockwork.Clock, delta, tt
 				} else {
 					wq.q.Push(j, j.Priority)
 				}
-
-				//Pop job
-				// wq.PopJobs()
 			case <-ticker.C:
 				//Check Done
 				expired := wq.q.RemoveIfLongerThan(ttl)
@@ -95,7 +91,7 @@ func (wq *WaitQueue) PopJob() {
 
 	old := wq.q.Pop()
 	if old != nil {
-		atomic.AddInt64(&wq.quota, -1)
+		wq.quota--
 		go func() {
 			wq.out <- old.(*job.Job)
 		}()
@@ -109,9 +105,9 @@ func (wq *WaitQueue) QueueJob(j *job.Job) {
 }
 
 func (wq *WaitQueue) RunDone() {
-	go func() {
-		atomic.AddInt64(&wq.quota, 1)
-	}()
+	wq.m.Lock()
+	defer wq.m.Unlock()
+	wq.quota++
 }
 
 func getJobQuota(multiplier float64) int64 {

@@ -2,13 +2,11 @@ package scheduler
 
 import (
 	"context"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"../job"
-	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -97,13 +95,12 @@ func TestScheduler1000(t *testing.T) {
 
 func TestSchedulerLongRunning(t *testing.T) {
 	s := DefaultScheduler()
-	s.Clock = clockwork.NewFakeClock()
 	s.TTL = int64(1000)
 	s.Run()
 	var wg sync.WaitGroup
-	wg.Add(runtime.NumCPU() - 2)
-	for i := 1; i < 30; i++ {
-		j := job.NewJob(context.Background(), "sleep", "3")
+	wg.Add(6)
+	for i := 0; i < 6; i++ {
+		j := job.NewJob(context.Background(), "sleep", "10")
 		s.AddJob(j)
 		go func() {
 			err := j.Wait()
