@@ -14,8 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"../util"
-
 	"github.com/jonboulle/clockwork"
 )
 
@@ -67,7 +65,6 @@ func (j *Job) Start() error {
 
 	j.Cmd.Start()
 	j.pid = j.Cmd.Process.Pid
-	util.PinToCPUs(j.pid, 0, 1, 2)
 	j.SetState(Started)
 	go func() {
 		if err := j.Cmd.Wait(); err != nil {
