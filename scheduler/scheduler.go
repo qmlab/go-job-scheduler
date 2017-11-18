@@ -1,8 +1,13 @@
 package scheduler
 
-import "context"
-import "../job"
-import "../../src/github.com/jonboulle/clockwork"
+import (
+	"context"
+	"os"
+
+	"../../src/github.com/jonboulle/clockwork"
+	"../job"
+	"../util"
+)
 
 type scheduler struct {
 	wq     WaitQueue
@@ -24,6 +29,8 @@ func DefaultScheduler() *scheduler {
 }
 
 func (s *scheduler) Run() {
+	pid := os.Getpid()
+	util.PinToCPU(pid, 0)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
 	var errcList []<-chan error

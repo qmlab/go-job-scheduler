@@ -114,7 +114,7 @@ func TestSchedulerLongRunning(t *testing.T) {
 
 func TestSchedulerStress(t *testing.T) {
 	s := DefaultScheduler()
-	s.TTL = int64(1000)
+	s.TTL = int64(100000)
 	s.Run()
 	var wg sync.WaitGroup
 	for i := 1; i < 10; i++ {
