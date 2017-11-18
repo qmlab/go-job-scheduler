@@ -6,7 +6,6 @@ import (
 
 	"../../src/github.com/jonboulle/clockwork"
 	"../job"
-	"../util"
 )
 
 type scheduler struct {
@@ -30,7 +29,6 @@ func DefaultScheduler() *scheduler {
 
 func (s *scheduler) Run() {
 	pid := os.Getpid()
-	util.PinToCPU(pid, 0)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
 	var errcList []<-chan error
