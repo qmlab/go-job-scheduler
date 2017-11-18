@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"os"
 
 	"../../src/github.com/jonboulle/clockwork"
 	"../job"
@@ -28,7 +27,6 @@ func DefaultScheduler() *scheduler {
 }
 
 func (s *scheduler) Run() {
-	pid := os.Getpid()
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
 	var errcList []<-chan error
