@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"../util"
+
 	"github.com/jonboulle/clockwork"
 )
 
@@ -25,6 +27,7 @@ type Job struct {
 	state    JobState  // Job atate
 	Err      error
 	Clock    clockwork.Clock
+	CPUs     []uint
 
 	ctx     context.Context
 	pid     int // Process ID
@@ -65,6 +68,9 @@ func (j *Job) Start() error {
 
 	j.Cmd.Start()
 	j.pid = j.Cmd.Process.Pid
+	if len(j.CPUs) > 0 {
+		util.PinToCPUs(j.pid, j.CPUs...)
+	}
 	j.SetState(Started)
 	go func() {
 		if err := j.Cmd.Wait(); err != nil {
