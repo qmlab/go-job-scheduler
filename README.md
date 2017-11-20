@@ -1,6 +1,6 @@
 # Go Job Scheduler
 
-Job scheduler that executes jobs as forked processes based on priority and then time order.
+Job scheduler that executes jobs as spawned individual processes based on priority and then time order.
 To enhance fairness, priority can be automatically adjusted based on waiting time.
 
 Jobs added longer than a TTL will be cancelled.
@@ -17,11 +17,11 @@ Scheduler can be safely shut down using Close() call at any time. It will cancel
 * Resource-aware scheduling. Will scheduler jobs based on total number of CPUs
 * Strict state machine of job status. It can be extended to save the job states into a persistent store such that the scheduler will become more robust.
 * Use of Golang pipeline model to handle jobs and errors. The jobs will be passed in several channels and the error will go to an error sink for external handling.
+* Support for job CPU affinity
 
 ## Upcoming
 * Various policies - from ensuring fairness to being aggressive to run high priority jobs asap
 * Use process groups to control processes together
-* Affinity of the main process
 
 ## License
 
